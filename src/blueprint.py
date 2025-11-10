@@ -1,3 +1,27 @@
+# This file is part of the Grometheus project
+# Copyright (C) PsychedelicPalimpsest - 2025
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""
+This file acts as a basic parser and evaluator for the Android.bp (Blueprint)
+files. 
+"""
+
+
+
+
 from io import StringIO
 
 from string import ascii_letters, digits, whitespace
@@ -24,6 +48,12 @@ class BlueprintState:
         return self._variables.get(variable_name)
     def set_variable(self, name : str, value : 'BPType_Base'):
         self._variables[name] = value
+
+    def evaluate(self):
+        return {
+            k: v.evaluate(self)
+            for k, v in self._variables.items() 
+        }
 
 
 
@@ -537,15 +567,21 @@ def ascii_find(io: StringIO, value : str) -> None | str:
 
 
 class BlueprintFile:
+    _rules : list[tuple[str, EVAL_VALUE]]
+    _state : BlueprintState
+
+
+
+    _evaluated_variables : dict[str, EVAL_VALUE]
+
+
     def __init__(self, io : StringIO) -> None:
         self._state = BlueprintState(io.read())
-        self._rules : list[tuple[str, EVAL_VALUE]] = []
+        self._rules = []
 
         io.seek(0)
 
         skip_ascii_whitespace(io)
-
-        lines = []
 
         while True:
             skip_ascii_whitespace(io)
@@ -611,29 +647,19 @@ class BlueprintFile:
 
             elif c[0] == '{':
                 self._rules.append((name.name(), BPType_Map.deserialize(io).evaluate(self._state)))
-
-
-
-
             else:
                 raise BP_ParseError(io, "Invalid syntax")
 
+        self._evaluated_variables = self._state.evaluate()
+        
+
+    def rules(self):
+        return self._rules
+    def variables(self):
+        return self._evaluated_variables
 
 
 
                 
 
 
-print(BlueprintFile(StringIO("""
-
-CFLAGS = []
-
-CFLAGS += ["a", "b"]
-CFLAGS += ["c", "d"]
-
-cc_library {
-    name: "libacme_foo",
-    cflags: CFLAGS,
-    defaults: ["acme_defaults"],
-    srcs: ["*.cpp"],
-}"""))._rules)
