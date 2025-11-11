@@ -80,11 +80,17 @@ def get_file_tree(url: str, branch: str) -> list[str]:
 def get_manifest_for(branch: str):
     with TemporaryDirectory() as td:
         check_output(["git", "clone", "--branch", branch, "--single-branch", ANDROID_MANIFEST_URL,  "--depth", "1"], cwd=td, stderr=DEVNULL)
-        manifest = XmlManifest(td, join(td, "manifest", "default.xml"))
+        xmlPath = join(td, "manifest", "default.xml")
+        manifest = XmlManifest(td, xmlPath)
+
+        with open(xmlPath, "r") as f:
+            cont = f.read()
+
+
         return [
             {"path": p.relpath, "url": p.remote.url, "revision" : p.revisionExpr}
             for p in manifest.projects
-        ]
+        ], cont
 
 
 
