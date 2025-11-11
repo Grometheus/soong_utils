@@ -1,0 +1,3 @@
+[submodule "git-repo"]
+	path = git-repo
+	url = https://gerrit.googlesource.com/git-repo
