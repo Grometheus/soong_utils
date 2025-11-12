@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
+from os import listdir, makedirs, walk
 import subprocess
 from tempfile import TemporaryDirectory
 from subprocess import check_output, check_call, DEVNULL
@@ -28,16 +29,15 @@ sys.path.append(join(dirname(dirname(abspath(__file__))), "git-repo"))
 
 from manifest_xml import XmlManifest, _XmlRemote, Project
 from project import logger
+
 logger.disabled = True
-
-
 
 
 ANDROID_MANIFEST_URL = "https://android.googlesource.com/platform/manifest"
 
 # An evil hack to fix a bug
 # Note; This will break ALL other repos with a manifest!
-_XmlRemote._resolveFetchUrl = lambda _: "https://android.googlesource.com/" 
+_XmlRemote._resolveFetchUrl = lambda _: "https://android.googlesource.com/"
 
 
 def get_tags_for_repo(url: str) -> dict[str, str]:
@@ -77,29 +77,69 @@ def get_file_tree(url: str, branch: str) -> list[str]:
         out = check_output(["git", "ls-tree", "-r", "HEAD", "--name-only"], cwd=td)
         return out.rstrip().decode("utf-8").split("\n")
 
-def get_manifest_for(branch: str):
-    with TemporaryDirectory() as td:
-        check_output(["git", "clone", "--branch", branch, "--single-branch", ANDROID_MANIFEST_URL,  "--depth", "1"], cwd=td, stderr=DEVNULL)
-        xmlPath = join(td, "manifest", "default.xml")
-        manifest = XmlManifest(td, xmlPath)
 
-        with open(xmlPath, "r") as f:
-            cont = f.read()
-
-
-        return [
-            {"path": p.relpath, "url": p.remote.url, "revision" : p.revisionExpr}
-            for p in manifest.projects
-        ], cont
-
-
-
-
-
+def clone_manifest_into(branch: str, tag_dir: str):
+    check_call(
+        [
+            "git",
+            "clone",
+            "--depth=1",
+            "--single-branch",
+            "--branch",
+            branch,
+            ANDROID_MANIFEST_URL,
+            ".",
+        ],
+        cwd=tag_dir,
+        stdout=DEVNULL,
+        stderr=DEVNULL,
+    )
 
 
+def is_typical_tag(tag_dir: str) -> bool:
+    listing = listdir(tag_dir)
+    return (
+        sum((1 for f in listing if f.endswith(".xml"))) == 1
+        and "default.xml" in listing
+    )
 
 
+def get_manifest_for(tag_dir: str):
+    xmlPath = join(tag_dir, "default.xml")
+    manifest = XmlManifest(tag_dir, xmlPath)
+
+    return [
+        {"path": p.relpath, "url": p.remote.url, "revision": p.revisionExpr}
+        for p in manifest.projects
+    ]
+
+
+def clone_git_into(repo_url: str, out_dir: str):
+    makedirs(out_dir)
+    check_call(
+        [
+            "git",
+            "clone",
+            repo_url,
+            ".",
+        ],
+        cwd=out_dir,
+        stdout=DEVNULL,
+        stderr=DEVNULL,
+    )
+
+
+def set_git_branch(branch: str, repo_dir: str):
+    check_call(
+        ["git", "checkout", branch], cwd=repo_dir, stdout=DEVNULL, stderr=DEVNULL
+    )
+
+
+def search_for_extensions(ext: str, repo_dir: str):
+    out = []
+    for dir_path, _, files in walk(repo_dir):
+        out += [join(dir_path, fn) for fn in files if fn.endswith(ext)]
+    return out
 
 
 # android-14.0.0_r30
