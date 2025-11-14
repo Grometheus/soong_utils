@@ -112,14 +112,6 @@ class TagSearcherEvent(Event[None]):
 
 
 
-
-
-
-
-
-
-
-
 def output_to(out_dir: str) -> None:
     with EventManager(max_workers=32, do_log=True) as mng:
         tags_e = AndroidManifestTagsEvent(out_dir)

@@ -129,9 +129,33 @@ def clone_git_into(repo_url: str, out_dir: str):
     )
 
 
+def clone_sparsly_filtered_repo_into(repo_url: str, out_dir: str, filetype: str):
+    makedirs(out_dir)
+    check_call(
+        [
+            "git",
+            "clone",
+            "--filter=blob:none",
+            "--sparse",
+            repo_url,
+            ".",
+        ],
+        cwd=out_dir,
+#        stdout=DEVNULL,
+#        stderr=DEVNULL,
+    )
+    check_call(
+        ["git", "sparse-checkout", "set", "--no-cone", "--", f"**/*.{filetype}"],
+        cwd=out_dir,
+ #       stdout=DEVNULL,
+ #       stderr=DEVNULL,
+    )
+
+
 def set_git_branch(branch: str, repo_dir: str):
     check_call(
-        ["git", "checkout", branch], cwd=repo_dir, stdout=DEVNULL, stderr=DEVNULL
+        ["git", "checkout", branch], cwd=repo_dir, 
+        #stdout=DEVNULL, stderr=DEVNULL
     )
 
 
