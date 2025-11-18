@@ -10,7 +10,6 @@ clone_sparsly_filtered_repo_into(
     "https://android.googlesource.com/platform/frameworks/base",
     base_test,
     "bp"
-
 )
 """
 

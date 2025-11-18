@@ -138,9 +138,7 @@ def output_to(out_dir: str) -> None:
 
         mng.schedule_event(TagSearcherEvent(out_dir, tags_e))
 
-
         # Demo: second run should still print because dependency resolves
-
 
         # Example for later:
         # tags = sorted_manifest_tags()

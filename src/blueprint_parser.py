@@ -15,11 +15,9 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-This file acts as a basic parser and evaluator for the Android.bp (Blueprint)
-files. 
+This file acts as a basic parser for the Android.bp (Blueprint)
+files.
 """
-
-
 
 
 from io import StringIO
@@ -33,29 +31,22 @@ DIGITS_SET = set(digits)
 WHITESPACE_SET = set(whitespace)
 
 
-
 class BlueprintState:
-    _variables : dict[str, 'BPType_Base']
-    _text_blob : str
+    _variables: dict[str, "BPType_Base"]
+    _text_blob: str
 
-
-    
-    def __init__(self, text_blob : str) -> None:
+    def __init__(self, text_blob: str) -> None:
         self._variables = {}
         self._text_blob = text_blob
 
-    def get_variable(self, variable_name : str) -> 'BPType_Base | None':
+    def get_variable(self, variable_name: str) -> "BPType_Base | None":
         return self._variables.get(variable_name)
-    def set_variable(self, name : str, value : 'BPType_Base'):
+
+    def set_variable(self, name: str, value: "BPType_Base"):
         self._variables[name] = value
 
     def evaluate(self):
-        return {
-            k: v.evaluate(self)
-            for k, v in self._variables.items() 
-        }
-
-
+        return {k: v.evaluate(self) for k, v in self._variables.items()}
 
 
 def read_ascii_group(io: StringIO, valid_letters: set) -> str:
@@ -68,12 +59,51 @@ def read_ascii_group(io: StringIO, valid_letters: set) -> str:
 
     return word
 
+
 def skip_ascii_whitespace(io: StringIO):
     while len(c := io.read(1)) and c in whitespace:
         pass
 
     if 0 != len(c):
         io.seek(io.tell() - len(c))
+
+
+def skip_to_valid(io: StringIO):
+    """
+    Skips comments and whitespace
+    returns true if comment found
+    """
+    found = False
+    while True:
+        skip_ascii_whitespace(io)
+        c = io.read(1)
+        io.seek(io.tell() - len(c))
+
+        if not c:
+            return False
+
+        if c != "/":
+            break
+
+        comment_prefix = io.read(2)
+        # Currently we just discard the comments
+        if comment_prefix == "//":
+            _ = ascii_find(io, "\n")
+        elif comment_prefix == "/*":
+            _ = ascii_find(io, "*/")
+
+            before_pos = io.tell()
+            value = ascii_find(io, "\n")
+
+            if value is not None and value.strip():
+                io.seek(before_pos)
+                raise BP_ParseError(io, "Nothing can follow comments!")
+        else:
+            io.seek(io.tell() - len(comment_prefix))
+            raise BP_ParseError(io, "Invalid syntax")
+        found = True
+    skip_ascii_whitespace(io)
+    return found
 
 
 class BP_ParseError(Exception):
@@ -108,6 +138,7 @@ class BP_ParseError(Exception):
 
         super().__init__(our_msg)
 
+
 class BP_EvalError(BP_ParseError):
     def __init__(self, parse_ctx: StringIO | None, message: str) -> None:
         if parse_ctx is not None:
@@ -116,10 +147,7 @@ class BP_EvalError(BP_ParseError):
             Exception.__init__(self, message)
 
 
-
-
-EVAL_VALUE: TypeAlias =  int | bool | str | list[str] | dict[str, "EVAL_VALUE"]
-
+EVAL_VALUE: TypeAlias = int | bool | str | list[str] | dict[str, "EVAL_VALUE"]
 
 
 class BPType_Base:
@@ -141,9 +169,8 @@ class BPType_Base:
     def test(cls, io: StringIO) -> bool:
         raise NotImplemented
 
-
     # Take the BPType and translate it into a more pythonic value, defined by method
-    def evaluate(self, state : BlueprintState) -> EVAL_VALUE:
+    def evaluate(self, state: BlueprintState) -> EVAL_VALUE:
         raise NotImplemented
 
 
@@ -174,9 +201,10 @@ class BPType_Variable(BPType_Base):
             raise BP_ParseError(io, "Invalid variable name")
 
         return cls(word)
-    
+
     def evaluate(self, state: BlueprintState):
         return state.get_variable(self._value).evaluate(state)
+
     def name(self):
         return self._value
 
@@ -214,7 +242,7 @@ class BPType_Bool(BPType_Base):
         return ret
 
     def evaluate(self, state: BlueprintState) -> EVAL_VALUE:
-        return self._value 
+        return self._value
 
 
 class BPType_Int(BPType_Base):
@@ -264,7 +292,6 @@ class BPType_String(BPType_Base):
     def serialize(self, indentation_level=0) -> str:
         return f'"{self._value}"'
 
-
     def evaluate(self, state: BlueprintState) -> EVAL_VALUE:
         return self._value.replace('\\"', '"')
 
@@ -294,16 +321,11 @@ class BPType_String(BPType_Base):
         return cls(val)
 
 
-class BPType_StringList(BPType_Base):
-    _value: list[BPType_String]
+class BPType_List(BPType_Base):
+    _value: list[BPType_Base]
 
-    def __init__(self, value: list[BPType_String]) -> None:
+    def __init__(self, value: list[BPType_Base]) -> None:
         self._value = value
-
-    @classmethod
-    def from_list(cls, value: list[str]) -> "BPType_StringList":
-        return cls([BPType_String(s) for s in value])
-
 
     def evaluate(self, state: BlueprintState) -> EVAL_VALUE:
         return cast(list[str], [v.evaluate(state) for v in self._value])
@@ -334,7 +356,8 @@ class BPType_StringList(BPType_Base):
         value = []
 
         while True:
-            skip_ascii_whitespace(io)
+            skip_to_valid(io)
+
             c = io.read(1)
 
             if c == "]":
@@ -345,34 +368,25 @@ class BPType_StringList(BPType_Base):
                     expecting_ctrl = False
                     continue
                 else:
-                    io.seek(io.tell() - 1)
+                    io.seek(io.tell() - len(c))
                     raise BP_ParseError(io, "Invalid charictor found between strings")
             else:
-
-                io.seek(io.tell() - 1)
-                if c != '"':
-                    raise BP_ParseError(
-                        io, "Invalid charictor found while expecting string"
-                    )
-                value.append(BPType_String.deserialize(io))
+                io.seek(io.tell() - len(c))
+                value.append(BP_parse_value(io))
                 expecting_ctrl = True
 
         return cls(value)
 
 
 class BPType_Map(BPType_Base):
+
     _value: list[tuple[BPType_Variable, BPType_Base]]
 
     def __init__(self, value: list[tuple[BPType_Variable, BPType_Base]]) -> None:
         self._value = value
 
-
     def evaluate(self, state: BlueprintState) -> EVAL_VALUE:
-        return {
-            k.name() : v.evaluate(state)
-            for k, v in self._value
-        }
-
+        return {k.name(): v.evaluate(state) for k, v in self._value}
     @classmethod
     def test(cls, io: StringIO) -> bool:
         c = io.read(1)
@@ -403,7 +417,7 @@ class BPType_Map(BPType_Base):
             raise BP_ParseError(io, "Not a map!")
         values = []
         while True:
-            skip_ascii_whitespace(io)
+            skip_to_valid(io)
             c = io.read(1)
 
             if c == "}":
@@ -418,7 +432,7 @@ class BPType_Map(BPType_Base):
 
             key = BPType_Variable.deserialize(io)
 
-            skip_ascii_whitespace(io)
+            skip_to_valid(io)
 
             c = io.read(1)
 
@@ -428,13 +442,11 @@ class BPType_Map(BPType_Base):
                     io, "Must use a ':' to seperate key and value in maps"
                 )
 
-            skip_ascii_whitespace(io)
+            skip_to_valid(io)
 
             value = BP_parse_value(io)
-
             values.append((key, value))
-
-            skip_ascii_whitespace(io)
+            skip_to_valid(io)
 
             c = io.read(1)
 
@@ -451,7 +463,7 @@ class BPType_AddOp(BPType_Base):
     _oprand1: BPType_Base
     _oprand2: BPType_Base
 
-    SUPPORTED_ADD_TYPES = [BPType_Int, BPType_String, BPType_StringList, BPType_Map]
+    SUPPORTED_ADD_TYPES = [BPType_Int, BPType_String, BPType_List, BPType_Map]
 
     def __init__(self, oprand1: BPType_Base, oprand2: BPType_Base) -> None:
         self._oprand1 = oprand1
@@ -490,7 +502,8 @@ class BPType_AddOp(BPType_Base):
         if (c := io.read(1)) != "+":
             io.seek(io.tell() - len(c))
             raise BP_ParseError(io, "Not an add op")
-        skip_ascii_whitespace(io)
+
+        skip_to_valid(io)
 
         c = BP_identify(io)
         if not c in cls.SUPPORTED_ADD_TYPES:
@@ -500,13 +513,15 @@ class BPType_AddOp(BPType_Base):
             )
         return cls(previous, c.deserialize(io))
 
-
     def evaluate(self, state: BlueprintState) -> EVAL_VALUE:
         or1 = self._oprand1.evaluate(state)
         or2 = self._oprand2.evaluate(state)
 
         if type(or1) is not type(or2):
-            raise BP_EvalError(None, f"Cannot add between {type(or1)} and {or2}, aka: \n\t{self._oprand1.serialize(1)} \n and \n\t {self._oprand2.serialize(1)}")
+            raise BP_EvalError(
+                None,
+                f"Cannot add between {type(or1)} and {or2}, aka: \n\t{self._oprand1.serialize(1)} \n and \n\t {self._oprand2.serialize(1)}",
+            )
         if type(or1) is str:
             return or1 + cast(str, or2)
         if type(or1) is int:
@@ -516,10 +531,7 @@ class BPType_AddOp(BPType_Base):
         if type(or1) is dict:
             return {**or1, **cast(dict, or2)}
 
-
         assert False, "This should never happen"
-
-
 
 
 def BP_parse_value(io: StringIO) -> BPType_Base:
@@ -528,17 +540,17 @@ def BP_parse_value(io: StringIO) -> BPType_Base:
         raise BP_ParseError(io, "Value expected.")
     val = c.deserialize(io)
 
-    skip_ascii_whitespace(io)
+    skip_to_valid(io)
     while BPType_AddOp.is_addop(io):
         val = BPType_AddOp.join(val, io)
-        skip_ascii_whitespace(io)
+        skip_to_valid(io)
     return val
 
 
 # Most specific to least specific
 RAW_TYPES = [
     BPType_Bool,
-    BPType_StringList,
+    BPType_List,
     BPType_Map,
     BPType_Int,
     BPType_String,
@@ -552,8 +564,7 @@ def BP_identify(io: StringIO) -> Type[BPType_Base] | None:
             return t
 
 
-
-def ascii_find(io: StringIO, value : str) -> None | str:
+def ascii_find(io: StringIO, value: str) -> None | str:
     found = ""
     while len(value) == len(slab := io.read(len(value))) and slab != value:
         found += value[0]
@@ -562,29 +573,22 @@ def ascii_find(io: StringIO, value : str) -> None | str:
     return found if slab == value else None
 
 
-
-
-
-
 class BlueprintFile:
-    _rules : list[tuple[str, EVAL_VALUE]]
-    _state : BlueprintState
+    _rules: list[tuple[str, EVAL_VALUE]]
+    _state: BlueprintState
 
+    _evaluated_variables: dict[str, EVAL_VALUE]
 
-
-    _evaluated_variables : dict[str, EVAL_VALUE]
-
-
-    def __init__(self, io : StringIO) -> None:
+    def __init__(self, io: StringIO) -> None:
         self._state = BlueprintState(io.read())
         self._rules = []
 
         io.seek(0)
 
-        skip_ascii_whitespace(io)
+        skip_to_valid(io)
 
         while True:
-            skip_ascii_whitespace(io)
+            skip_to_valid(io)
 
             c = io.read(1)
             io.seek(io.tell() - len(c))
@@ -592,74 +596,60 @@ class BlueprintFile:
             if not c:
                 break
 
-            if c == '/':
-                comment_prefix = io.read(2)
-                # Currently we just discard the comments
-                if comment_prefix == "//":
-                    _ = ascii_find(io, "\n")
-                    continue
-                elif comment_prefix == "/*":
-                    _ = ascii_find(io, "*/")
-
-                    before_pos = io.tell()
-                    value = ascii_find(io, "\n")
-
-                    if value is not None and value.strip():
-                        io.seek(before_pos)
-                        raise BP_ParseError(io, "Nothing can follow comments!")
-                    continue
-                else:
-                    io.seek(io.tell() - len(comment_prefix))
-                    raise BP_ParseError(io, "Invalid syntax")
-
             if not c in ascii_letters:
                 raise BP_ParseError(io, "Invalid syntax")
 
             name = cast(BPType_Variable, BPType_Variable.deserialize(io))
 
             line_start = io.tell()
-            skip_ascii_whitespace(io)
+            skip_to_valid(io)
 
             c = io.read(2)
             io.seek(io.tell() - len(c))
 
-            if c[0] == '=' or c == "+=":
+            if c[0] == "=" or c == "+=":
                 io.seek(io.tell() + (1 if c[0] == "=" else 2))
-                skip_ascii_whitespace(io)
+
+                skip_to_valid(io)
 
                 value = BP_parse_value(io)
 
-                if c[0] == '=':
+                if c[0] == "=":
                     if self._state.get_variable(name.name()) is not None:
                         io.seek(line_start)
-                        raise BP_EvalError(io, f"Cannot set variable '{name.name()}' as it is already defined")
+                        raise BP_EvalError(
+                            io,
+                            f"Cannot set variable '{name.name()}' as it is already defined",
+                        )
                     self._state.set_variable(name.name(), value)
                 else:
                     old_value = self._state.get_variable(name.name())
-                    if old_value  is None:
+                    if old_value is None:
                         io.seek(line_start)
-                        raise BP_EvalError(io, f"Cannot add to variable '{name.name()}' as it is NOT already defined")
+                        raise BP_EvalError(
+                            io,
+                            f"Cannot add to variable '{name.name()}' as it is NOT already defined",
+                        )
 
                     self._state.set_variable(
-                        name.name(),
-                        BPType_AddOp(old_value, value)
+                        name.name(), BPType_AddOp(old_value, value)
                     )
 
-            elif c[0] == '{':
-                self._rules.append((name.name(), BPType_Map.deserialize(io).evaluate(self._state)))
+            elif c[0] == "{":
+                self._rules.append(
+                    (name.name(), BPType_Map.deserialize(io).evaluate(self._state))
+                )
             else:
                 raise BP_ParseError(io, "Invalid syntax")
 
         self._evaluated_variables = self._state.evaluate()
-        
+
+    @classmethod
+    def from_str(cls, str_cont: str) -> "BlueprintFile":
+        return cls(StringIO(str_cont))
 
     def rules(self):
         return self._rules
+
     def variables(self):
         return self._evaluated_variables
-
-
-
-                
-
-
