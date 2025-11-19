@@ -16,21 +16,24 @@
 
 
 try:
-    from .blueprint_parser import BlueprintFile, EVAL_VALUE
+    from .blueprint_parser import BlueprintFile, BlueprintState, EVAL_VALUE
 except ImportError:
-    from blueprint_parser import BlueprintFile, EVAL_VALUE
+    from blueprint_parser import BlueprintFile, BlueprintState, EVAL_VALUE
 
 import os
+from os.path import dirname, join, relpath
+
 import pickle
 import logging
 from typing import cast
 
 from blueprint_parser import BP_EvalError
 
+
 FILE_REGISTRY_T = dict[str, list[tuple[str, EVAL_VALUE]]]
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.ERROR)
 
 
 
@@ -143,14 +146,14 @@ class BPE_BlueprintConsumer:
 
 
 
-    def injest(self, bp_file: str):
+    def _injest_file(self, bp_file: str, state : BlueprintState):
         """
         Takes in a .bp file, and adds it to the dependency info.
         """
 
 
         with open(bp_file, "r") as f:
-            bpf = BlueprintFile.from_str(f.read(), True)
+            bpf = BlueprintFile.from_str(f.read(), state)
 
         sourceFile = BPE_SourceFile(os.path.abspath(bp_file))
 
@@ -181,6 +184,40 @@ class BPE_BlueprintConsumer:
             sourceFile.register(m)
         self._file_registry[sourceFile.path] = sourceFile 
     
+    def injest_dir(self, path : str):
+        out = []
+
+        path = os.path.abspath(path)
+
+
+
+        states = {dirname(path): BlueprintState(None, False)}
+
+        for dir_path, _, files in os.walk(path):
+            parent_state = None
+            
+            parent_path = dir_path
+            while parent_state is None:
+                parent_path = dirname(parent_path)
+                parent_state = states.get(parent_path)
+
+                assert parent_path != "" and parent_path != "/"
+
+
+            state = BlueprintState(parent_state)
+            states[dir_path] = state
+
+
+            # We need some sort of canonical ordering due to variable scoping.
+            for f in sorted(filter(lambda x: x.endswith(".bp"), files)):
+                self._injest_file(join(dir_path, f), state)
+
+
+
+        return out
+
+
+
     def compute_defaults(self):
         for name, obj in filter(lambda o: "defaults" in o[1].values, self._object_registry.items()):
             for default in obj.values["defaults"]:
@@ -201,10 +238,8 @@ class BPE_BlueprintConsumer:
 from android_repo_searcher import search_for_extensions
 
 col = BPE_BlueprintConsumer()
-for file in search_for_extensions(".bp", "/home/mitch/Documents/grom/base/"):
-    col.injest(file)
+col.injest_dir("/home/mitch/Documents/grom/base/")
 col.compute_defaults()
-print(col.debug())
 
 
 

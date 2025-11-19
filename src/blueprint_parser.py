@@ -31,30 +31,39 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 
-
-
-
 WORD_LETTERS = set(ascii_letters + "_" + digits)
 DIGITS_SET = set(digits)
 WHITESPACE_SET = set(whitespace)
 
 
 class BlueprintState:
+    _parent_state: "BlueprintState | None"
     _variables: dict[str, "BPType_Base"]
-    _text_blob: str
-    _is_lenient : bool
+    _is_lenient: bool
 
-    def __init__(self, text_blob: str, is_lenient : bool) -> None:
+    def __init__(
+        self, parent: "BlueprintState | None", is_lenient: bool | None = None
+    ) -> None:
+        self._parent_state = parent
+
         self._variables = {}
-        self._text_blob = text_blob
 
-        self._is_lenient = is_lenient
+        self._is_lenient = (
+            is_lenient
+            if is_lenient is not None
+            else parent.is_lenient() if parent is not None else False
+        )
 
     def get_variable(self, variable_name: str) -> "BPType_Base | None":
-        return self._variables.get(variable_name)
+        return self._variables.get(variable_name) or (
+            self._parent_state.get_variable(variable_name)
+            if self._parent_state is not None
+            else None
+        )
 
     def set_variable(self, name: str, value: "BPType_Base"):
         self._variables[name] = value
+
     def is_lenient(self):
         return self._is_lenient
 
@@ -363,7 +372,8 @@ class BPType_List(BPType_Base):
 
         if sum((len(s) + 2 for s in strs)) > NEWLINE_THRESHOLD:
             nl = "\n" + "\t" * (indentation_level)
-            return f"[{nl}\t{  f',{nl}\t'.join(strs) }{nl}]"
+            values = f',{nl}\t'.join(strs)
+            return f"[{nl}\t{values}{nl}]"
         else:
             return "[" + ", ".join(strs) + "]"
 
@@ -409,6 +419,7 @@ class BPType_Map(BPType_Base):
     def evaluate(self, state: BlueprintState) -> EVAL_VALUE:
 
         return {k.name(): v.evaluate(state) for k, v in self._value}
+
     @classmethod
     def test(cls, io: StringIO) -> bool:
         c = io.read(1)
@@ -487,7 +498,13 @@ class BPType_AddOp(BPType_Base):
     _oprand1: BPType_Base
     _oprand2: BPType_Base
 
-    SUPPORTED_ADD_TYPES = [BPType_Int, BPType_String, BPType_List, BPType_Map, BPType_Variable]
+    SUPPORTED_ADD_TYPES = [
+        BPType_Int,
+        BPType_String,
+        BPType_List,
+        BPType_Map,
+        BPType_Variable,
+    ]
 
     def __init__(self, oprand1: BPType_Base, oprand2: BPType_Base) -> None:
         self._oprand1 = oprand1
@@ -603,8 +620,8 @@ class BlueprintFile:
 
     _evaluated_variables: dict[str, EVAL_VALUE]
 
-    def __init__(self, io: StringIO, is_lenient : bool = False) -> None:
-        self._state = BlueprintState(io.read(), is_lenient)
+    def __init__(self, io: StringIO, state: BlueprintState) -> None:
+        self._state = state
         self._rules = []
 
         io.seek(0)
@@ -639,13 +656,7 @@ class BlueprintFile:
                 value = BP_parse_value(io)
 
                 if c[0] == "=":
-                    if self._state.get_variable(name.name()) is not None:
-                        io.seek(line_start)
-                        raise BP_EvalError(
-                            io,
-                            f"Cannot set variable '{name.name()}' as it is already defined",
-                        )
-                    self._state.set_variable(name.name(), value)
+                   self._state.set_variable(name.name(), value)
                 else:
                     old_value = self._state.get_variable(name.name())
                     if old_value is None:
@@ -669,8 +680,8 @@ class BlueprintFile:
         self._evaluated_variables = self._state.evaluate()
 
     @classmethod
-    def from_str(cls, str_cont: str, is_lenient : bool = False) -> "BlueprintFile":
-        return cls(StringIO(str_cont), is_lenient)
+    def from_str(cls, str_cont: str, state: BlueprintState) -> "BlueprintFile":
+        return cls(StringIO(str_cont), state)
 
     def rules(self):
         return self._rules
