@@ -25,6 +25,14 @@ from io import StringIO
 from string import ascii_letters, digits, whitespace
 from typing import TextIO, Type, cast, TypeAlias
 
+import logging
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+
+
+
 
 WORD_LETTERS = set(ascii_letters + "_" + digits)
 DIGITS_SET = set(digits)
@@ -34,16 +42,21 @@ WHITESPACE_SET = set(whitespace)
 class BlueprintState:
     _variables: dict[str, "BPType_Base"]
     _text_blob: str
+    _is_lenient : bool
 
-    def __init__(self, text_blob: str) -> None:
+    def __init__(self, text_blob: str, is_lenient : bool) -> None:
         self._variables = {}
         self._text_blob = text_blob
+
+        self._is_lenient = is_lenient
 
     def get_variable(self, variable_name: str) -> "BPType_Base | None":
         return self._variables.get(variable_name)
 
     def set_variable(self, name: str, value: "BPType_Base"):
         self._variables[name] = value
+    def is_lenient(self):
+        return self._is_lenient
 
     def evaluate(self):
         return {k: v.evaluate(self) for k, v in self._variables.items()}
@@ -203,7 +216,16 @@ class BPType_Variable(BPType_Base):
         return cls(word)
 
     def evaluate(self, state: BlueprintState):
-        return state.get_variable(self._value).evaluate(state)
+        value = state.get_variable(self._value)
+
+        if value is None:
+            if state.is_lenient():
+                logger.warning(f"Undefined variable: {self._value}")
+                return "<UNDEFINED VARIABLE>"
+            else:
+                raise BP_EvalError(None, f"Undefined variable: {self._value}")
+
+        return value.evaluate(state)
 
     def name(self):
         return self._value
@@ -270,7 +292,6 @@ class BPType_Int(BPType_Base):
     @classmethod
     def deserialize(cls, io: StringIO) -> "BPType_Base":
         word = read_ascii_group(io, DIGITS_SET)
-        print([word])
         if not cls._test(word):
             io.seek(io.tell() - len(word))
             raise BP_ParseError(io, f"Cannot parse int: {word}")
@@ -386,6 +407,7 @@ class BPType_Map(BPType_Base):
         self._value = value
 
     def evaluate(self, state: BlueprintState) -> EVAL_VALUE:
+
         return {k.name(): v.evaluate(state) for k, v in self._value}
     @classmethod
     def test(cls, io: StringIO) -> bool:
@@ -445,6 +467,8 @@ class BPType_Map(BPType_Base):
             skip_to_valid(io)
 
             value = BP_parse_value(io)
+            assert value is not None
+
             values.append((key, value))
             skip_to_valid(io)
 
@@ -463,7 +487,7 @@ class BPType_AddOp(BPType_Base):
     _oprand1: BPType_Base
     _oprand2: BPType_Base
 
-    SUPPORTED_ADD_TYPES = [BPType_Int, BPType_String, BPType_List, BPType_Map]
+    SUPPORTED_ADD_TYPES = [BPType_Int, BPType_String, BPType_List, BPType_Map, BPType_Variable]
 
     def __init__(self, oprand1: BPType_Base, oprand2: BPType_Base) -> None:
         self._oprand1 = oprand1
@@ -579,8 +603,8 @@ class BlueprintFile:
 
     _evaluated_variables: dict[str, EVAL_VALUE]
 
-    def __init__(self, io: StringIO) -> None:
-        self._state = BlueprintState(io.read())
+    def __init__(self, io: StringIO, is_lenient : bool = False) -> None:
+        self._state = BlueprintState(io.read(), is_lenient)
         self._rules = []
 
         io.seek(0)
@@ -645,8 +669,8 @@ class BlueprintFile:
         self._evaluated_variables = self._state.evaluate()
 
     @classmethod
-    def from_str(cls, str_cont: str) -> "BlueprintFile":
-        return cls(StringIO(str_cont))
+    def from_str(cls, str_cont: str, is_lenient : bool = False) -> "BlueprintFile":
+        return cls(StringIO(str_cont), is_lenient)
 
     def rules(self):
         return self._rules

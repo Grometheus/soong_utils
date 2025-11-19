@@ -92,10 +92,6 @@ class BPE_Module:
 
 
 
-class BPEHooks_HookMng:
-    def __init__(self) -> None:
-        pass
-
 
 
 
@@ -154,7 +150,7 @@ class BPE_BlueprintConsumer:
 
 
         with open(bp_file, "r") as f:
-            bpf = BlueprintFile.from_str(f.read())
+            bpf = BlueprintFile.from_str(f.read(), True)
 
         sourceFile = BPE_SourceFile(os.path.abspath(bp_file))
 
@@ -164,6 +160,19 @@ class BPE_BlueprintConsumer:
 
         for i, (rule, values) in enumerate(file_rules):
             m = BPE_Module(i, rule, values, sourceFile)
+
+
+            # Meta medules that determine the build system:
+            # https://github.com/AOSP-15-Dev/android_build_soong/blob/677aa108ce2cb58f3392254dd04dd7925024c728/android/soong_config_modules.go#L40
+            
+            if rule in [
+                "soong_config_module_type_import", 
+                "soong_config_module_type", 
+                "soong_config_string_variable", 
+                "soong_config_bool_variable", 
+                "soong_config_value_variable"]:
+                # TODO: Figure out this
+                continue
             name = m.get_lookup_name()
             if name in self._object_registry:
                 raise BP_EvalError(None, f"Duplicate key '{name}' found!")
@@ -193,7 +202,6 @@ from android_repo_searcher import search_for_extensions
 
 col = BPE_BlueprintConsumer()
 for file in search_for_extensions(".bp", "/home/mitch/Documents/grom/base/"):
-    print(file)
     col.injest(file)
 col.compute_defaults()
 print(col.debug())
