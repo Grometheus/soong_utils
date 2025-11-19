@@ -21,7 +21,7 @@ except ImportError:
     from blueprint_parser import BlueprintFile, BlueprintState, EVAL_VALUE
 
 import os
-from os.path import dirname, join, relpath
+from os.path import abspath, dirname, join, relpath
 
 import pickle
 import logging
@@ -184,37 +184,25 @@ class BPE_BlueprintConsumer:
             sourceFile.register(m)
         self._file_registry[sourceFile.path] = sourceFile 
     
-    def injest_dir(self, path : str):
-        out = []
-
-        path = os.path.abspath(path)
-
-
-
+    def injest_dir(self, path: str):
+        path = abspath(path)
         states = {dirname(path): BlueprintState(None, False)}
 
         for dir_path, _, files in os.walk(path):
-            parent_state = None
-            
+            # Find nearest parent directory with a registered state
             parent_path = dir_path
-            while parent_state is None:
+            while parent_path not in states:
                 parent_path = dirname(parent_path)
-                parent_state = states.get(parent_path)
+                if parent_path in ("", "/"):
+                    raise RuntimeError(f"No parent state found for {dir_path}")
 
-                assert parent_path != "" and parent_path != "/"
-
-
+            parent_state = states[parent_path]
             state = BlueprintState(parent_state)
             states[dir_path] = state
 
-
-            # We need some sort of canonical ordering due to variable scoping.
-            for f in sorted(filter(lambda x: x.endswith(".bp"), files)):
-                self._injest_file(join(dir_path, f), state)
-
-
-
-        return out
+            for filename in sorted(f for f in files if f.endswith(".bp")):
+                full_path = join(dir_path, filename)
+                self._injest_file(full_path, state)
 
 
 
